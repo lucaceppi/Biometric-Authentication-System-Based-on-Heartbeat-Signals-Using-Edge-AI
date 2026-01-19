@@ -1,0 +1,79 @@
+/*
+  Arduino UNO R4 WiFi
+  Pulse Sensor: A0
+  LED: pin 8
+  USB Serial: Serial (to Raspberry Pi)
+
+  Protocol:
+   - Arduino -> Pi: "S,<ms>,<adc>\n"
+   - Pi -> Arduino: "AUTH,1\n" or "AUTH,0\n"
+*/
+
+static const int PULSE_PIN = A0;
+static const int LED_PIN   = 8;
+
+static const uint32_t FS_HZ = 100;
+static const uint32_t PERIOD_MS = 1000 / FS_HZ;
+
+uint32_t lastSampleMs = 0;
+bool authed = false;
+
+String rxLine;
+
+void applyLed() {
+  if (authed) {
+    digitalWrite(LED_PIN, HIGH);
+  } else {
+    digitalWrite(LED_PIN, (millis() / 300) % 2);
+  }
+}
+
+void handleLine(const String& line) {
+  // Expected: AUTH,1 or AUTH,0
+  if (line.startsWith("AUTH,")) {
+    if (line.length() >= 6) {
+      char v = line.charAt(5);
+      authed = (v == '1');
+    }
+  }
+}
+
+void setup() {
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  Serial.begin(115200);
+  delay(300);
+
+  lastSampleMs = millis();
+}
+
+void loop() {
+  uint32_t now = millis();
+
+  // Sample at ~100 Hz
+  if (now - lastSampleMs >= PERIOD_MS) {
+    lastSampleMs += PERIOD_MS;
+
+    int adc = analogRead(PULSE_PIN);
+
+    Serial.print("S,");
+    Serial.print(now);
+    Serial.print(",");
+    Serial.println(adc);
+  }
+
+  // Read commands from Pi
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\n') {
+      rxLine.trim();
+      if (rxLine.length() > 0) handleLine(rxLine);
+      rxLine = "";
+    } else if (c != '\r') {
+      if (rxLine.length() < 80) rxLine += c;
+    }
+  }
+
+  applyLed();
+}
